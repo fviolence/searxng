@@ -1,19 +1,46 @@
+{% macro correction_controls() -%}
+  {%- for correction in corrections -%}
+    {%- if method == 'GET' -%}
+      <a class="correction-link" href="{{ url_for(
+        'search',
+        q=correction.url,
+        categories=selected_categories|join(','),
+        language=current_language,
+        time_range=time_range or none,
+        safesearch=safesearch,
+        theme=theme,
+        timeout_limit=timeout_limit or none
+      ) }}"><strong>{{ correction.title }}</strong></a>
+    {%- else -%}
+      <button type="submit" form="corrections-form" name="q" value="{{ correction.url }}" class="correction-link"><strong>{{ correction.title }}</strong></button>
+    {%- endif -%}
+    {%- if not loop.last -%}{{ _(', ') }}{% endif -%}
+  {%- endfor -%}
+{%- endmacro %}
+
     <div id="corrections" role="complementary" aria-labelledby="corrections-title">
-      <h4 id="corrections-title">{{ _('Try searching for:') }}</h4>
-      {% for correction in corrections %}
-      <div class="left">
-	      <form method="{{ method or 'POST' }}" action="{{ url_for('search') }}" role="navigation">
-          {% for category in selected_categories %}
-          <input type="hidden" name="category_{{ category }}" value="1">
-          {% endfor %}
-          <input type="hidden" name="q" value="{{ correction.url }}">
-          <input type="hidden" name="language" value="{{ current_language }}">
-          <input type="hidden" name="time_range" value="{{ time_range }}">
-          <input type="hidden" name="safesearch" value="{{ safesearch }}">
-          <input type="hidden" name="theme" value="{{ theme }}">
-          {% if timeout_limit %}<input type="hidden" name="timeout_limit" value="{{ timeout_limit }}" >{% endif %}
-          <input type="submit" role="link" value="{{ correction.title }}">
-	      </form>
-      </div>
-      {% endfor %}
+      {%- if method != 'GET' %}
+      <form id="corrections-form" method="{{ method or 'POST' }}" action="{{ url_for('search') }}">
+        {% for category in selected_categories %}
+        <input type="hidden" name="category_{{ category }}" value="1">
+        {% endfor %}
+        <input type="hidden" name="language" value="{{ current_language }}">
+        <input type="hidden" name="time_range" value="{{ time_range }}">
+        <input type="hidden" name="safesearch" value="{{ safesearch }}">
+        <input type="hidden" name="theme" value="{{ theme }}">
+        {% if timeout_limit %}<input type="hidden" name="timeout_limit" value="{{ timeout_limit }}">{% endif %}
+      </form>
+      {%- endif %}
+      <h4 id="corrections-title">
+        {# Keep this compatibility fallback until ``Did you mean %(corrections)s?``
+           has broad catalog coverage.  The deterministic regression test is
+           ``test_search_html_uses_existing_prompt_when_new_translation_missing``;
+           remove both the fallback and that test when the compatibility path is retired. #}
+        {%- set correction_probe = _('Did you mean %(corrections)s?', corrections='__CORRECTIONS__') -%}
+        {%- if not locale_rfc5646.startswith('en') and correction_probe == 'Did you mean __CORRECTIONS__?' -%}
+        {{ _('Try searching for:') }} {{ correction_controls() }}
+        {%- else -%}
+        {{ _('Did you mean %(corrections)s?', corrections=correction_controls()) }}
+        {%- endif -%}
+      </h4>
     </div>

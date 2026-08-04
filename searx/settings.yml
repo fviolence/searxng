@@ -2069,6 +2069,18 @@ engines:
     shortcut: qki
     disabled: true
 
+  # Optional external service that returns {"correction": "..."} from
+  # POST /v1/correct.  Set base_url and inactive: false in the instance settings.
+  # For a trusted local HTTP service, also set enable_http: true.  The 1-second
+  # default assumes a local service; override timeout for a remote service.
+  - name: query corrector
+    engine: query_corrector
+    shortcut: qc
+    base_url: ''
+    disabled: true
+    inactive: true
+    display_error_messages: false
+
   - name: qwant
     qwant_categ: web
     engine: qwant

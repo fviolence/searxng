@@ -49,6 +49,7 @@ CATEGORY_GROUPS = {
     'LYRICS': 'lyrics',
     'PACKAGES': 'packages',
     'Q_A': 'q&a',
+    'QUERY_CORRECTION': 'query correction',
     'REPOS': 'repos',
     'SOFTWARE_WIKIS': 'software wikis',
     'WEB': 'web',

@@ -2,9 +2,13 @@
 # pylint: disable=missing-module-docstring,disable=missing-class-docstring,invalid-name
 
 import json
+from urllib.parse import parse_qs, urlparse
 import babel
-from mock import Mock
+from mock import Mock, patch
+from lxml import html
 
+import searx.engines
+import searx.locales
 import searx.webapp
 import searx.search
 import searx.search.processors
@@ -13,6 +17,24 @@ from searx.result_types._base import MainResult
 from searx.results import Timing
 from searx.preferences import Preferences
 from tests import SearxTestCase
+
+
+class _TestTranslations:
+
+    def __init__(self, messages):
+        self.messages = messages
+
+    def ugettext(self, message):
+        return self.messages.get(message, message)
+
+    def ungettext(self, singular, plural, number):
+        return self.ugettext(singular if number == 1 else plural)
+
+    def upgettext(self, _context, message):
+        return self.ugettext(message)
+
+    def unpgettext(self, _context, singular, plural, number):
+        return self.ungettext(singular, plural, number)
 
 
 class ViewsTestCase(SearxTestCase):  # pylint: disable=too-many-public-methods
@@ -47,12 +69,13 @@ class ViewsTestCase(SearxTestCase):  # pylint: disable=too-many-public-methods
             Timing(engine='startpage', total=0.8, load=0.7),
             Timing(engine='youtube', total=0.9, load=0.6),
         ]
+        self.search_corrections = set()
 
         def search_mock(search_self, *args):  # pylint: disable=unused-argument
             search_self.result_container = Mock(
                 get_ordered_results=lambda: test_results,
                 answers={},
-                corrections=set(),
+                corrections=self.search_corrections,
                 suggestions=set(),
                 infoboxes=[],
                 unresponsive_engines=set(),
@@ -124,6 +147,100 @@ class ViewsTestCase(SearxTestCase):  # pylint: disable=too-many-public-methods
             b'<p class="content">\n    second <span class="highlight">test</span> ',
             result.data,
         )
+
+    def test_search_html_renders_correction_as_get_link(self):
+        self.search_corrections.add('system shock remake')
+        self.client.set_cookie('method', 'GET')
+        self.setattr4test(searx.engines.engines['dummy engine'], 'categories', ['q&a'])
+
+        result = self.client.get(
+            '/search',
+            query_string={'q': 'sysrem shosh reamke', 'engines': 'dummy engine'},
+        )
+
+        self.assertEqual(result.status_code, 200)
+        document = html.fromstring(result.data)
+        corrections = document.get_element_by_id('corrections')
+        title = corrections.get_element_by_id('corrections-title')
+        self.assertEqual(title.text_content().strip(), 'Did you mean system shock remake?')
+
+        links = corrections.xpath('.//a[@class="correction-link"]')
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0].text_content(), 'system shock remake')
+        self.assertFalse(corrections.xpath('.//button'))
+        self.assertFalse(corrections.xpath('.//form'))
+
+        parsed_link = urlparse(links[0].get('href'))
+        self.assertEqual(parsed_link.path, '/search')
+        link_query = parse_qs(parsed_link.query)
+        self.assertEqual(link_query['q'], ['system shock remake'])
+        self.assertEqual(link_query['categories'], ['q&a'])
+
+    def test_search_html_uses_existing_prompt_when_new_translation_missing(self):
+        self.search_corrections.add('system shock remake')
+        self.client.set_cookie('method', 'GET')
+        self.client.set_cookie('locale', 'de')
+        translations = _TestTranslations({'Try searching for:': 'Existing translated prompt:'})
+
+        with patch.object(searx.locales, '_flask_babel_get_translations', return_value=translations):
+            result = self.client.get(
+                '/search',
+                query_string={'q': 'sysrem shosh reamke', 'engines': 'dummy engine'},
+            )
+
+        self.assertEqual(result.status_code, 200)
+        document = html.fromstring(result.data)
+        title = document.get_element_by_id('corrections-title')
+        self.assertEqual(title.text_content().strip(), 'Existing translated prompt: system shock remake')
+
+    def test_search_html_uses_translated_correction_separator(self):
+        self.search_corrections.update(('first correction', 'second correction'))
+        self.client.set_cookie('method', 'GET')
+        self.client.set_cookie('locale', 'de')
+        translations = _TestTranslations(
+            {
+                'Did you mean %(corrections)s?': 'Meinten Sie %(corrections)s?',
+                ', ': ' / ',
+            }
+        )
+
+        with patch.object(searx.locales, '_flask_babel_get_translations', return_value=translations):
+            result = self.client.get(
+                '/search',
+                query_string={'q': 'typo query', 'engines': 'dummy engine'},
+            )
+
+        self.assertEqual(result.status_code, 200)
+        document = html.fromstring(result.data)
+        title = document.get_element_by_id('corrections-title')
+        title_text = title.text_content().strip()
+        self.assertTrue(title_text.startswith('Meinten Sie '))
+        self.assertTrue(title_text.endswith('?'))
+        self.assertIn(' / ', title_text)
+        self.assertEqual(
+            {link.text_content() for link in title.xpath('.//a[@class="correction-link"]')},
+            {'first correction', 'second correction'},
+        )
+
+    def test_search_html_keeps_post_correction_form(self):
+        self.search_corrections.add('system shock remake')
+
+        result = self.client.post('/search', data={'q': 'sysrem shosh reamke'})
+
+        self.assertEqual(result.status_code, 200)
+        document = html.fromstring(result.data)
+        corrections = document.get_element_by_id('corrections')
+        title = corrections.get_element_by_id('corrections-title')
+        self.assertEqual(title.text_content().strip(), 'Did you mean system shock remake?')
+
+        forms = corrections.xpath('./form[@id="corrections-form"]')
+        self.assertEqual(len(forms), 1)
+        buttons = corrections.xpath('.//button[@type="submit" and @form="corrections-form"]')
+        self.assertEqual(len(buttons), 1)
+        self.assertEqual(buttons[0].get('name'), 'q')
+        self.assertEqual(buttons[0].get('value'), 'system shock remake')
+        self.assertEqual(buttons[0].text_content(), 'system shock remake')
+        self.assertFalse(corrections.xpath('.//a[@class="correction-link"]'))
 
     def test_index_json(self):
         result = self.client.post('/', data={'q': 'test', 'format': 'json'})

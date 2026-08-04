@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from parameterized import parameterized
 
+from searx.engines import query_corrector as query_corrector_engine
 from searx.exceptions import SearxSettingsException
 from searx import settings_loader
 from tests import SearxTestCase
@@ -42,6 +43,26 @@ class TestDefaultSettings(SearxTestCase):
         self.assertIsInstance(settings['engines'], list)
         self.assertIsInstance(settings['doi_resolvers'], dict)
         self.assertIsInstance(settings['default_doi_resolver'], str)
+
+    def test_query_correction_defaults(self):
+        settings, _ = settings_loader.load_settings(load_user_settings=False)
+        query_corrector = next(engine for engine in settings['engines'] if engine['name'] == 'query corrector')
+        self.assertEqual(query_corrector['engine'], 'query_corrector')
+        self.assertEqual(query_corrector['shortcut'], 'qc')
+        self.assertEqual(query_corrector['base_url'], '')
+        self.assertNotIn('enable_http', query_corrector)
+        self.assertNotIn('api_path', query_corrector)
+        self.assertNotIn('max_query_length', query_corrector)
+        self.assertNotIn('max_correction_length', query_corrector)
+        self.assertNotIn('timeout', query_corrector)
+        self.assertEqual(query_corrector_engine.api_path, '/v1/correct')
+        self.assertEqual(query_corrector_engine.max_query_length, 80)
+        self.assertEqual(query_corrector_engine.max_correction_length, 256)
+        self.assertEqual(query_corrector_engine.timeout, 1.0)
+        self.assertEqual(query_corrector_engine.categories, ['general', 'query correction'])
+        self.assertTrue(query_corrector['disabled'])
+        self.assertTrue(query_corrector['inactive'])
+        self.assertFalse(query_corrector['display_error_messages'])
 
 
 class TestUserSettings(SearxTestCase):
